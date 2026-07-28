@@ -8,7 +8,6 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
-
   :root{
     --side:#20353a;--side-2:#182a2e;--side-line:#33484c;
     --side-ink:#e4ecec;--side-muted:#93a4a4;--side-sec:#a7b6b6;
@@ -430,8 +429,8 @@ function renderIoBody(){
     <div style="padding:22px">
       <div class="form-grid" style="max-width:640px">
         <div class="field"><label>${isIn?'Nhà cung cấp':'Đối tượng sử dụng'} (gõ mã hoặc chọn)</label>
-          <input id="vc-partner" list="partner-list" placeholder="${isIn?'VD: NCC001':'VD: DT001'}">
-          <datalist id="partner-list">${partners.map(p=>`<option value="${esc(p.code)}">${esc(p.name)}</option>`).join('')}</datalist>
+          <input id="vc-partner" list="partner-list" placeholder="${isIn?'VD: NCC001 hoặc tên NCC':'VD: DT001 hoặc tên đối tượng'}">
+          <datalist id="partner-list">${partners.map(p=>`<option value="${esc(p.code)} — ${esc(p.name)}">`).join('')}</datalist>
         </div>
         <div class="field"><label>Ngày tháng năm</label><input id="vc-date" type="date" value="${today()}"></div>
       </div>
@@ -455,7 +454,7 @@ function renderLines(){
   tb.innerHTML=voucherLines.map((ln,i)=>{
     const g=good(ln.goodId);
     return `<tr>
-      <td><select onchange="lineGood(${i},this.value)"><option value="">— Chọn mã hàng —</option>${DB.goods.map(x=>`<option value="${x.id}" ${x.id===ln.goodId?'selected':''}>${esc(x.code)}</option>`).join('')}</select></td>
+      <td><select onchange="lineGood(${i},this.value)"><option value="">— Chọn mã hàng —</option>${DB.goods.map(x=>`<option value="${x.id}" ${x.id===ln.goodId?'selected':''}>${esc(x.code)} — ${esc(x.name)}</option>`).join('')}</select></td>
       <td class="line-name">${g?esc(g.name)+' <span style="color:var(--label)">('+fmt(g.qty)+' '+esc(g.unit||'')+' tồn)</span>':'—'}</td>
       <td><input type="number" min="1" value="${ln.qty}" onchange="lineQty(${i},this.value)"></td>
       <td style="text-align:right">${voucherLines.length>1?`<button class="rm" onclick="rmLine(${i})">Xoá</button>`:''}</td>
@@ -555,9 +554,17 @@ function printVoucher(id){
 async function saveVoucher(){
   const isIn=ioMode==='in';
   const partners=isIn?DB.suppliers:DB.targets;
-  const codeInput=val('vc-partner').toLowerCase();
-  const partner=partners.find(p=>p.code.toLowerCase()===codeInput||p.name.toLowerCase()===codeInput);
-  if(!partner){ toast(isIn?'Chọn hoặc gõ đúng mã nhà cung cấp':'Chọn hoặc gõ đúng mã đối tượng sử dụng'); return; }
+  const raw=val('vc-partner');
+  // chấp nhận: "mã", "tên", hoặc "mã — tên" (lấy phần trước dấu — làm mã)
+  const codePart=raw.split('—')[0].trim().toLowerCase();
+  const rawLower=raw.toLowerCase();
+  const partner=partners.find(p=>
+    p.code.toLowerCase()===codePart ||
+    p.code.toLowerCase()===rawLower ||
+    p.name.toLowerCase()===rawLower ||
+    `${p.code} — ${p.name}`.toLowerCase()===rawLower
+  );
+  if(!partner){ toast(isIn?'Chọn hoặc gõ đúng nhà cung cấp':'Chọn hoặc gõ đúng đối tượng sử dụng'); return; }
   const date=val('vc-date');
   if(!date){ toast('Chọn ngày'); return; }
   const lines=voucherLines.filter(l=>l.goodId&&l.qty>0);
@@ -712,7 +719,7 @@ function runNXTReport(){
     totalRow:['','','','','TỔNG',tIn,tOut,tClose]};
   document.getElementById('rp-result').innerHTML=`
   <div class="kpis">
-    <div class="kpi"><div class="k">Tổng nhập trong kỳ</div><div class="v accent">${fmt(tIn)}</div></div>
+    <div class="kpi"><div class="k">Tổng nhập kỳ</div><div class="v accent">${fmt(tIn)}</div></div>
     <div class="kpi"><div class="k">Tổng xuất kỳ</div><div class="v danger">${fmt(tOut)}</div></div>
     <div class="kpi"><div class="k">Tồn cuối kỳ</div><div class="v">${fmt(tClose)}</div></div>
   </div>
