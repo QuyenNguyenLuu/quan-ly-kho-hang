@@ -945,7 +945,61 @@ function vUsers(v){
   <table><thead><tr><th>Họ tên</th><th>Tên đăng nhập</th><th>Vai trò</th><th class="num">Thao tác</th></tr></thead>
   <tbody>${DB.users.map(u=>`<tr><td><b>${esc(u.name)}</b></td><td>${esc(u.username)}</td>
     <td><span class="tag ${u.role==='admin'?'tag-accent':'tag-muted'}">${u.role==='admin'?'Quản trị viên':'Nhân viên'}</span></td>
-    <td class="num"><div class="actions"><button class="btn-sm" onclick="userForm('${u.id}')">Sửa</button>${u.id!==CURRENT.id?`<button class="btn-sm danger" onclick="delUser('${u.id}')">Xoá</button>`:''}</div></td></tr>`).join('')}</tbody></table></div>`;
+    <td class="num"><div class="actions"><button class="btn-sm" onclick="userForm('${u.id}')">Sửa</button>${u.id!==CURRENT.id?`<button class="btn-sm danger" onclick="delUser('${u.id}')">Xoá</button>`:''}</div></td></tr>`).join('')}</tbody></table></div>
+
+  <div class="panel"><div class="panel-head"><h3>Sao lưu &amp; khôi phục dữ liệu</h3></div>
+    <div style="padding:20px 22px">
+      <p style="font-size:13.5px;color:var(--muted);margin-bottom:16px;max-width:640px">
+        Tải toàn bộ dữ liệu (hàng hoá, phiếu nhập/xuất, nhà cung cấp, đối tượng, người dùng) về một file để lưu trữ phòng khi mất mát.
+        Nên sao lưu định kỳ. Khi cần, có thể khôi phục lại từ file đã lưu.</p>
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="backupData()">Tải file sao lưu</button>
+        <label class="btn btn-ghost" style="cursor:pointer">Khôi phục từ file
+          <input type="file" accept="application/json,.json" style="display:none" onchange="restoreData(this)">
+        </label>
+      </div>
+      <p style="font-size:12.5px;color:var(--danger);margin-top:14px">Lưu ý: khôi phục sẽ <b>ghi đè toàn bộ</b> dữ liệu hiện tại trên máy chủ (mọi máy). Hãy sao lưu bản hiện tại trước khi khôi phục.</p>
+    </div>
+  </div>`;
+}
+/* ===== sao lưu / khôi phục ===== */
+function backupData(){
+  const payload={ app:'coco-cottage-kho', version:2, exportedAt:new Date().toISOString(), data:DB };
+  const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=`sao-luu-kho-${today()}.json`;
+  a.click();
+  toast('Đã tải file sao lưu');
+}
+function restoreData(input){
+  const file=input.files&&input.files[0];
+  input.value=''; // reset để chọn lại cùng file được
+  if(!file) return;
+  const reader=new FileReader();
+  reader.onload=async()=>{
+    let parsed;
+    try{ parsed=JSON.parse(reader.result); }catch(e){ toast('File không hợp lệ'); return; }
+    const data=parsed&&parsed.data?parsed.data:parsed; // chấp nhận cả file bọc lẫn thuần DB
+    if(!data||!Array.isArray(data.goods)||!Array.isArray(data.users)){ toast('File sao lưu không đúng định dạng'); return; }
+    const nG=data.goods.length,nV=(data.vouchers||[]).length,nU=data.users.length;
+    if(!confirm(`Khôi phục sẽ GHI ĐÈ toàn bộ dữ liệu hiện tại trên mọi máy.\n\nFile chứa: ${nG} mặt hàng, ${nV} phiếu, ${nU} người dùng.\n\nTiếp tục?`)) return;
+    // đảm bảo còn ít nhất 1 admin và giữ được đăng nhập
+    DB={
+      users:data.users||[],
+      goods:data.goods||[],
+      suppliers:data.suppliers||[],
+      targets:data.targets||[],
+      vouchers:data.vouchers||[]
+    };
+    await save();
+    // giữ phiên đăng nhập nếu tài khoản hiện tại còn tồn tại, nếu không thì đăng xuất
+    const stillThere=DB.users.find(u=>u.id===CURRENT.id);
+    toast('Đã khôi phục dữ liệu');
+    if(stillThere){ CURRENT=stillThere; renderApp(); }
+    else { logout(); }
+  };
+  reader.readAsText(file);
 }
 function userForm(id){
   if(!isAdmin()){ toast('Chỉ quản trị viên mới thao tác được'); return; }
