@@ -177,6 +177,36 @@
 <div id="root"><div class="loading">Đang tải…</div></div>
 <div id="toast" class="toast"></div>
 
+<!-- Firebase (CDN, không cần npm) -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
+  import { getFirestore, doc, getDoc, setDoc, onSnapshot, enableIndexedDbPersistence }
+    from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyAv8a7M3rWKYBw1bImPpB9JUyROb4y64q8",
+    authDomain: "coco-cottage-kho.firebaseapp.com",
+    projectId: "coco-cottage-kho",
+    storageBucket: "coco-cottage-kho.firebasestorage.app",
+    messagingSenderId: "690856050132",
+    appId: "1:690856050132:web:5d2b071b578cd6a6daaa41"
+  };
+  const app = initializeApp(firebaseConfig);
+  const db  = getFirestore(app);
+  // cho dùng offline + tự đồng bộ khi có mạng
+  try{ await enableIndexedDbPersistence(db); }catch(e){}
+
+  const ref = doc(db, "app", "data");   // toàn bộ dữ liệu nằm trong 1 document
+
+  // expose cho script chính (không phải module) dùng
+  window.FB = {
+    async loadDoc(){ const snap = await getDoc(ref); return snap.exists()? snap.data().json : null; },
+    async saveDoc(jsonStr){ await setDoc(ref, { json: jsonStr, at: Date.now() }); },
+    watch(cb){ onSnapshot(ref, s=>{ if(s.exists()) cb(s.data().json); }); }
+  };
+  window.dispatchEvent(new Event("fb-ready"));
+</script>
+
 <script>
 /* ====== thông tin có thể chỉnh ====== */
 const CLIENT = { name:'Coco Cottage', short:'Mũi Né – Phan Thiết' };
@@ -198,29 +228,35 @@ async function hashPw(pw){
 }
 
 /* ====== storage + migration ====== */
+// chờ Firebase sẵn sàng
+function fbReady(){ return new Promise(res=>{ if(window.FB) return res(); window.addEventListener('fb-ready',()=>res(),{once:true}); }); }
+
 async function load(){
-  let raw=null;
-  try{ raw=localStorage.getItem('inv-db-v2'); }catch(e){}
-  if(raw){ DB=JSON.parse(raw); return; }
-  // di trú từ bản cũ (inv-db) nếu có
+  await fbReady();
+  let remote=null;
+  try{ remote=await window.FB.loadDoc(); }catch(e){ console.warn(e); }
+  if(remote){ DB=JSON.parse(remote); startRealtime(); return; }
+
+  // Firestore trống → thử di trú dữ liệu localStorage cũ (nếu máy này từng dùng bản offline)
+  let local=null;
+  try{ local=localStorage.getItem('inv-db-v2'); }catch(e){}
+  if(local){ DB=JSON.parse(local); await save(); startRealtime(); toast('Đã chuyển dữ liệu lên máy chủ'); return; }
   let old=null;
   try{ old=JSON.parse(localStorage.getItem('inv-db')||'null'); }catch(e){}
   if(old){
     DB.users=old.users||[];
     DB.goods=(old.goods||[]).map(g=>({id:g.id,code:g.code,name:g.name,unit:g.unit||'cái',qty:g.qty||0,minQty:g.minQty??10}));
     DB.suppliers=[{id:uid(),code:'NCC001',name:'Nhà cung cấp chung'}];
-    // phòng ban tiêu thụ cũ → đối tượng sử dụng
     DB.targets=(old.depts||[]).filter(d=>d.type!=='kho').map(d=>({id:d.id,code:'DT'+d.id.slice(-4).toUpperCase(),name:d.name}));
     if(!DB.targets.length) DB.targets=[{id:uid(),code:'DT001',name:'Nhà hàng'},{id:uid(),code:'DT002',name:'Phòng ngủ'}];
-    // giao dịch cũ → phiếu 1 dòng
     DB.vouchers=(old.txns||[]).map(t=>({
       id:t.id,type:t.type,date:t.date,note:t.note||'',
       partnerId: t.type==='in' ? DB.suppliers[0].id : (DB.targets.find(x=>x.id===t.deptId)?.id||DB.targets[0].id),
       lines:[{goodId:t.goodId,qty:t.qty}]
     }));
-    await save(); return;
+    await save(); startRealtime(); return;
   }
-  // seed mới
+  // seed mới (lần đầu tiên dùng)
   DB={
     users:[{id:uid(),name:'Quản trị viên',username:'admin',role:'admin',pw:await hashPw('admin')}],
     goods:[
@@ -239,9 +275,27 @@ async function load(){
     ],
     vouchers:[]
   };
-  await save();
+  await save(); startRealtime();
 }
-async function save(){ try{ localStorage.setItem('inv-db-v2',JSON.stringify(DB)); }catch(e){ toast('Không lưu được dữ liệu'); } }
+async function save(){
+  try{ await window.FB.saveDoc(JSON.stringify(DB)); _lastSaved=JSON.stringify(DB); }
+  catch(e){ toast('Không lưu được lên máy chủ (kiểm tra mạng)'); }
+}
+/* đồng bộ thời gian thực: máy khác đổi dữ liệu thì tự cập nhật */
+let _lastSaved='';
+let _realtimeOn=false;
+function startRealtime(){
+  if(_realtimeOn) return; _realtimeOn=true; _lastSaved=JSON.stringify(DB);
+  window.FB.watch(jsonStr=>{
+    if(jsonStr===_lastSaved) return;          // chính mình vừa lưu → bỏ qua
+    _lastSaved=jsonStr;
+    try{ DB=JSON.parse(jsonStr); }catch(e){ return; }
+    if(CURRENT){
+      const modalOpen=document.getElementById('overlay')?.classList.contains('show');
+      if(!modalOpen) renderApp();   // tránh vẽ lại khi đang nhập liệu trong hộp thoại
+    }
+  });
+}
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 
 /* ====== helpers ====== */
@@ -946,7 +1000,13 @@ function modal(title,body,onSubmit){
 async function submitModal(){ if(modalSubmit){ const ok=await modalSubmit(); if(ok!==false) closeModal(); } }
 function closeModal(){ document.getElementById('overlay')?.classList.remove('show'); }
 
-(async()=>{ await load(); renderGate(); })();
+(async()=>{
+  try{ await load(); renderGate(); }
+  catch(e){
+    console.error(e);
+    document.getElementById('root').innerHTML='<div class="loading">Không kết nối được máy chủ dữ liệu.<br>Kiểm tra mạng rồi tải lại trang.</div>';
+  }
+})();
 </script>
 </body>
 </html>
