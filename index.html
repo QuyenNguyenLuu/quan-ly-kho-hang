@@ -541,7 +541,7 @@ function renderVoucherHistory(type){
     <td>${fmtDate(vc.date)}</td><td>${esc(partnerName(vc))}</td>
     <td style="font-size:13px;color:var(--muted)">${vc.lines.map(l=>{const g=good(l.goodId);return g?esc(g.code)+' × '+fmt(l.qty):'';}).filter(Boolean).join(', ')}${canc?`<br><span style="color:var(--danger);font-size:12px">Huỷ bởi ${esc(vc.cancelledBy||'')}${vc.cancelReason?' — '+esc(vc.cancelReason):''}</span>`:''}</td>
     <td class="num strong">${fmt(vc.lines.reduce((s,l)=>s+l.qty,0))}</td>
-    <td class="num"><div class="actions"><button class="btn-sm" onclick="printVoucher('${vc.id}')">In</button>${!canc?`<button class="btn-sm danger" onclick="delVoucher('${vc.id}')">Huỷ</button>`:''}</div></td></tr>`;
+    <td class="num"><div class="actions"><button class="btn-sm" onclick="printVoucher('${vc.id}')">In</button>${!canc&&isAdmin()?`<button class="btn-sm danger" onclick="delVoucher('${vc.id}')">Huỷ</button>`:''}</div></td></tr>`;
   }).join('');
   return filterBar+`<table style="margin-top:8px"><thead><tr><th>Số phiếu</th><th>Ngày</th><th>${type==='in'?'Nhà cung cấp':'Đối tượng'}</th><th>Chi tiết</th><th class="num">Tổng SL</th><th class="num">Thao tác</th></tr></thead>
   <tbody>${body}</tbody></table>`;
@@ -682,6 +682,7 @@ function nextVoucherCode(type,date){
   return `${key}-${String(next).padStart(4,'0')}`;
 }
 async function delVoucher(id){
+  if(!isAdmin()){ toast('Chỉ quản trị viên mới huỷ được phiếu'); return; }
   const vc=DB.vouchers.find(x=>x.id===id); if(!vc)return;
   if(vc.cancelled){ toast('Phiếu này đã huỷ trước đó'); return; }
   const reason=prompt(`Huỷ phiếu ${voucherCode(vc)}?\nTồn kho sẽ được hoàn lại và phiếu vẫn được lưu để tra cứu.\n\nNhập lý do huỷ (bắt buộc):`);
