@@ -98,6 +98,7 @@
   .rtab{padding:10px 18px;font-size:14px;font-weight:600;color:var(--muted);background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-1px;transition:.13s;font-family:var(--serif)}
   .rtab:hover{color:var(--ink)}
   .rtab.on{color:var(--accent-dark);border-bottom-color:var(--accent)}
+  .btn-sm.flt-on{background:var(--accent);color:#fff;border-color:var(--accent)}
 
   .stock-hero{display:flex;flex-wrap:wrap;gap:24px;justify-content:space-between;align-items:center;background:var(--side);color:#fff;border-radius:8px;padding:26px 30px;margin-bottom:24px}
   .sh-main .sh-label{font-size:13px;letter-spacing:1px;text-transform:uppercase;color:#9db0ad;font-weight:600}
@@ -397,8 +398,8 @@ function vDash(v){
   const lowItems=DB.goods.filter(isLow);
   const m=today().slice(0,7);
   let inM=0,outM=0;
-  DB.vouchers.forEach(vc=>{ if(vc.date.startsWith(m)){ const q=vc.lines.reduce((s,l)=>s+l.qty,0); if(vc.type==='in') inM+=q; else outM+=q; } });
-  const recent=[...DB.vouchers].sort((a,b)=>b.date.localeCompare(a.date)||b.id.localeCompare(a.id)).slice(0,8);
+  DB.vouchers.forEach(vc=>{ if(!vc.cancelled && vc.date.startsWith(m)){ const q=vc.lines.reduce((s,l)=>s+l.qty,0); if(vc.type==='in') inM+=q; else outM+=q; } });
+  const recent=[...DB.vouchers].filter(v=>!v.cancelled).sort((a,b)=>b.date.localeCompare(a.date)||b.id.localeCompare(a.id)).slice(0,8);
   const maxQty=Math.max(...DB.goods.map(g=>g.qty),1);
   v.innerHTML=`
   <div class="pagehead"><h2>Bảng điều khiển</h2><div class="sub">Tổng quan kho hàng · tháng ${m.split('-').reverse().join('/')}</div></div>
@@ -520,14 +521,30 @@ function rmLine(i){ voucherLines.splice(i,1); renderLines(); }
 function lineGood(i,v){ voucherLines[i].goodId=v; renderLines(); }
 function lineQty(i,v){ voucherLines[i].qty=Math.max(1,parseInt(v,10)||1); }
 function voucherCode(vc){ return vc.code || ((vc.type==='in'?'PN':'PX')+'-'+vc.date.slice(0,4)+'-'+vc.id.slice(-4).toUpperCase()); }
+let historyFilter='active'; // 'active' | 'cancelled' | 'all'
+function setHistoryFilter(f){ historyFilter=f; renderIoBody(); }
 function renderVoucherHistory(type){
-  const list=DB.vouchers.filter(v=>v.type===type).sort((a,b)=>b.date.localeCompare(a.date)||b.id.localeCompare(a.id)).slice(0,10);
-  if(!list.length) return `<div class="empty">Chưa có phiếu.</div>`;
-  return `<table><thead><tr><th>Số phiếu</th><th>Ngày</th><th>${type==='in'?'Nhà cung cấp':'Đối tượng'}</th><th>Chi tiết</th><th class="num">Tổng SL</th><th class="num">Thao tác</th></tr></thead>
-  <tbody>${list.map(vc=>`<tr><td><b>${esc(voucherCode(vc))}</b></td><td>${fmtDate(vc.date)}</td><td>${esc(partnerName(vc))}</td>
-    <td style="font-size:13px;color:var(--muted)">${vc.lines.map(l=>{const g=good(l.goodId);return g?esc(g.code)+' × '+fmt(l.qty):'';}).filter(Boolean).join(', ')}</td>
+  let all=DB.vouchers.filter(v=>v.type===type);
+  if(historyFilter==='active') all=all.filter(v=>!v.cancelled);
+  else if(historyFilter==='cancelled') all=all.filter(v=>v.cancelled);
+  const list=all.sort((a,b)=>b.date.localeCompare(a.date)||b.id.localeCompare(a.id)).slice(0,20);
+  const filterBar=`<div class="rtabs" style="margin-bottom:0;border:none;gap:6px">
+    <button class="btn-sm ${historyFilter==='active'?'flt-on':''}" onclick="setHistoryFilter('active')">Còn hiệu lực</button>
+    <button class="btn-sm ${historyFilter==='cancelled'?'flt-on':''}" onclick="setHistoryFilter('cancelled')">Đã huỷ</button>
+    <button class="btn-sm ${historyFilter==='all'?'flt-on':''}" onclick="setHistoryFilter('all')">Tất cả</button>
+  </div>`;
+  if(!list.length) return filterBar+`<div class="empty">Không có phiếu phù hợp.</div>`;
+  const body=list.map(vc=>{
+    const canc=vc.cancelled;
+    return `<tr${canc?' style="opacity:.6"':''}>
+    <td><b>${esc(voucherCode(vc))}</b>${canc?' <span class="tag tag-out" style="margin-left:4px">Đã huỷ</span>':''}</td>
+    <td>${fmtDate(vc.date)}</td><td>${esc(partnerName(vc))}</td>
+    <td style="font-size:13px;color:var(--muted)">${vc.lines.map(l=>{const g=good(l.goodId);return g?esc(g.code)+' × '+fmt(l.qty):'';}).filter(Boolean).join(', ')}${canc?`<br><span style="color:var(--danger);font-size:12px">Huỷ bởi ${esc(vc.cancelledBy||'')}${vc.cancelReason?' — '+esc(vc.cancelReason):''}</span>`:''}</td>
     <td class="num strong">${fmt(vc.lines.reduce((s,l)=>s+l.qty,0))}</td>
-    <td class="num"><div class="actions"><button class="btn-sm" onclick="printVoucher('${vc.id}')">In</button>${isAdmin()?`<button class="btn-sm danger" onclick="delVoucher('${vc.id}')">Xoá</button>`:''}</div></td></tr>`).join('')}</tbody></table>`;
+    <td class="num"><div class="actions"><button class="btn-sm" onclick="printVoucher('${vc.id}')">In</button>${!canc?`<button class="btn-sm danger" onclick="delVoucher('${vc.id}')">Huỷ</button>`:''}</div></td></tr>`;
+  }).join('');
+  return filterBar+`<table style="margin-top:8px"><thead><tr><th>Số phiếu</th><th>Ngày</th><th>${type==='in'?'Nhà cung cấp':'Đối tượng'}</th><th>Chi tiết</th><th class="num">Tổng SL</th><th class="num">Thao tác</th></tr></thead>
+  <tbody>${body}</tbody></table>`;
 }
 /* ====== in phiếu nhập/xuất để ký nhận ====== */
 function printVoucher(id){
@@ -581,6 +598,7 @@ function printVoucher(id){
       <div class="vno">Số phiếu:<br><span class="big">${esc(voucherCode(vc))}</span><br>Ngày: ${fmtDate(vc.date)}</div>
     </div>
     <h1>${isIn?'PHIẾU NHẬP KHO':'PHIẾU XUẤT KHO'}</h1>
+    ${vc.cancelled?`<div style="text-align:center;color:#b5544a;font-weight:700;font-size:16px;border:2px solid #b5544a;border-radius:6px;padding:6px;margin:8px auto 4px;max-width:360px">✕ PHIẾU ĐÃ HUỶ${vc.cancelReason?' — '+esc(vc.cancelReason):''}</div>`:''}
     <div class="meta">Liên số ${esc(voucherCode(vc))} — ngày ${fmtDate(vc.date)}</div>
     <div class="party">
       <div><b>${isIn?'Nhà cung cấp:':'Đối tượng sử dụng:'}</b> ${partner?esc(partner.code+' — '+partner.name):'—'}</div>
@@ -645,25 +663,38 @@ async function saveVoucher(){
   renderIoBody();
   printVoucher(vc.id);   // mở phiếu in để ký nhận
 }
-/* sinh số phiếu tự động: PN-YYYY-0001 (nhập), PX-YYYY-0001 (xuất) */
+/* sinh số phiếu tự động, KHÔNG BAO GIỜ tái sử dụng số.
+   Số lớn nhất được nhớ trong DB.counters và tính cả phiếu đã huỷ (vẫn nằm trong hệ thống). */
 function nextVoucherCode(type,date){
   const year=(date||today()).slice(0,4);
   const prefix=type==='in'?'PN':'PX';
-  let max=0;
+  const key=prefix+'-'+year;
+  if(!DB.counters) DB.counters={};
+  // lấy max giữa: bộ đếm đã lưu và số lớn nhất còn thấy trong danh sách phiếu (kể cả đã huỷ)
+  let max=DB.counters[key]||0;
   DB.vouchers.forEach(v=>{
-    if(v.type===type && v.code && v.code.startsWith(prefix+'-'+year+'-')){
+    if(v.type===type && v.code && v.code.startsWith(key+'-')){
       const n=parseInt(v.code.split('-')[2],10); if(n>max) max=n;
     }
   });
-  return `${prefix}-${year}-${String(max+1).padStart(4,'0')}`;
+  const next=max+1;
+  DB.counters[key]=next;   // ghi nhớ để không bao giờ lùi lại, kể cả khi phiếu bị huỷ/xoá
+  return `${key}-${String(next).padStart(4,'0')}`;
 }
 async function delVoucher(id){
-  if(!isAdmin()){ toast('Chỉ quản trị viên mới thao tác được'); return; }
-  if(!confirm('Xoá phiếu này? Tồn kho sẽ được hoàn lại.'))return;
   const vc=DB.vouchers.find(x=>x.id===id); if(!vc)return;
+  if(vc.cancelled){ toast('Phiếu này đã huỷ trước đó'); return; }
+  const reason=prompt(`Huỷ phiếu ${voucherCode(vc)}?\nTồn kho sẽ được hoàn lại và phiếu vẫn được lưu để tra cứu.\n\nNhập lý do huỷ (bắt buộc):`);
+  if(reason===null) return;                       // bấm Cancel
+  if(!reason.trim()){ toast('Cần nhập lý do huỷ'); return; }
+  // hoàn lại tồn kho
   vc.lines.forEach(l=>{ const g=good(l.goodId); if(g) g.qty+=vc.type==='in'?-l.qty:l.qty; });
-  DB.vouchers=DB.vouchers.filter(x=>x.id!==id);
-  await save(); toast('Đã xoá phiếu'); renderIoBody();
+  // đánh dấu huỷ, GIỮ phiếu lại (không xoá)
+  vc.cancelled=true;
+  vc.cancelledBy=CURRENT.name;
+  vc.cancelledAt=new Date().toISOString();
+  vc.cancelReason=reason.trim();
+  await save(); toast(`Đã huỷ phiếu ${voucherCode(vc)}`); renderIoBody();
 }
 
 /* ====== báo cáo: 4 tab ====== */
@@ -717,7 +748,7 @@ function runFlowDetailReport(){
   const partnerF=document.getElementById('rp-partner')?.value||'';
   const type=reportMode;
   const rows=[];
-  DB.vouchers.filter(vc=>vc.type===type&&vc.date>=from&&vc.date<=to&&(!partnerF||vc.partnerId===partnerF)).forEach(vc=>{
+  DB.vouchers.filter(vc=>!vc.cancelled&&vc.type===type&&vc.date>=from&&vc.date<=to&&(!partnerF||vc.partnerId===partnerF)).forEach(vc=>{
     vc.lines.forEach(l=>{
       if(goodF&&l.goodId!==goodF) return;
       const g=good(l.goodId); if(!g) return;
@@ -751,6 +782,7 @@ function runNXTReport(){
   const rows=goodsList.map(g=>{
     let inBefore=0,outBefore=0,inP=0,outP=0;
     DB.vouchers.forEach(vc=>{
+      if(vc.cancelled) return;
       vc.lines.forEach(l=>{
         if(l.goodId!==g.id) return;
         if(vc.date<from){ if(vc.type==='in') inBefore+=l.qty; else outBefore+=l.qty; }
@@ -759,7 +791,7 @@ function runNXTReport(){
     });
     // tồn đầu kỳ = tồn hiện tại − (mọi biến động từ 'from' trở đi)
     let netAfterFrom=0;
-    DB.vouchers.forEach(vc=>{ vc.lines.forEach(l=>{ if(l.goodId===g.id&&vc.date>=from) netAfterFrom+=(vc.type==='in'?l.qty:-l.qty); }); });
+    DB.vouchers.forEach(vc=>{ if(vc.cancelled) return; vc.lines.forEach(l=>{ if(l.goodId===g.id&&vc.date>=from) netAfterFrom+=(vc.type==='in'?l.qty:-l.qty); }); });
     const opening=g.qty-netAfterFrom;
     const closing=opening+inP-outP;
     return {code:g.code,name:g.name,unit:g.unit||'',opening,inP,outP,closing};
